@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interactive Petal Sculpture</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #06070a; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(0, 0, 0, .55) 100%);
+  }
+  .caption, .switch button {
+    font: 500 11px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: .14em; text-transform: uppercase;
+  }
+  .caption { position: fixed; left: 24px; top: 20px; pointer-events: none; color: rgba(214, 222, 232, .5); }
+  .caption b { color: rgba(236, 240, 245, .9); font-weight: 500; }
+  .controls {
+    position: fixed; left: 0; right: 0; bottom: 24px; padding: 0 16px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; pointer-events: none;
+  }
+  .switch {
+    display: flex; gap: 2px; padding: 3px; pointer-events: auto;
+    border: 1px solid rgba(214, 222, 232, .16); border-radius: 999px;
+    background: rgba(12, 14, 18, .6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .switch button {
+    appearance: none; border: 0; border-radius: 999px; padding: 7px 16px; cursor: pointer; white-space: nowrap;
+    background: transparent; color: rgba(214, 222, 232, .55);
+    transition: background .35s, color .35s;
+  }
+  .switch button:hover { color: rgba(236, 240, 245, .95); }
+  .switch button:focus-visible { outline: 1px solid rgba(214, 222, 232, .7); outline-offset: 1px; }
+  .switch button[aria-pressed="true"] { background: rgba(222, 228, 236, .9); color: #0a0c10; }
+  @media (max-width: 520px) { .switch button { padding: 7px 10px; letter-spacing: .08em; } }
+  .swatches button, .icon button { width: 29px; height: 29px; padding: 0; display: grid; place-items: center; }
+  .icon svg { display: block; }
+  /* the moon circles the planet for as long as orbit is switched on */
+  .icon .moon { transform-box: view-box; transform-origin: 50% 50%; }
+  .icon button[aria-pressed="true"] .moon { animation: moon-orbit 2.6s linear infinite; }
+  @keyframes moon-orbit { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .icon button[aria-pressed="true"] .moon { animation: none; } }
+  /* Tooltips: a small label above any control that carries a data-tip. */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 11px);
+    transform: translate(-50%, 4px); padding: 4px 9px; border-radius: 6px; white-space: nowrap;
+    background: rgba(226, 231, 238, .96); color: #0a0c10; pointer-events: none; opacity: 0;
+    font: 500 10px/1.6 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .1em; text-transform: uppercase;
+    transition: opacity .18s, transform .18s;
+  }
+  [data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+  /* the orbit button sits at the end of the row, so its label hangs from its right edge to stay on screen */
+  .icon [data-tip]::after { left: auto; right: -4px; transform: translate(0, 4px); }
+  .icon [data-tip]:hover::after, .icon [data-tip]:focus-visible::after { transform: translate(0, 0); }
+  .swatches i { width: 15px; height: 15px; border-radius: 50%; background: var(--metal); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+  @media (max-width: 520px) { .swatches button, .icon button { padding: 0; } }
+  .help-button {
+    position: fixed; right: 20px; top: 18px; width: 30px; height: 30px; padding: 0; cursor: pointer;
+    border: 1px solid rgba(214, 222, 232, .22); border-radius: 50%;
+    background: rgba(12, 14, 18, .6); color: rgba(214, 222, 232, .7);
+    font: 500 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    transition: background .25s, color .25s, border-color .25s;
+  }
+  .help-button:hover { color: #0a0c10; background: rgba(222, 228, 236, .9); border-color: transparent; }
+  .help-button:focus-visible, .help button:focus-visible { outline: 1px solid rgba(214, 222, 232, .7); outline-offset: 2px; }
+  .help {
+    width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-sizing: border-box;
+    padding: 22px 24px 24px; overflow: auto;
+    border: 1px solid rgba(214, 222, 232, .16); border-radius: 14px;
+    background: rgba(14, 16, 21, .92); color: rgba(226, 231, 238, .82);
+    font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .help::backdrop { background: rgba(3, 4, 6, .55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+  .help header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .help h2, .help h3 {
+    margin: 0; font: 500 11px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: .14em; text-transform: uppercase;
+  }
+  .help h2 { color: rgba(236, 240, 245, .95); }
+  .help h3 { margin-top: 18px; color: rgba(214, 222, 232, .45); }
+  .help header button {
+    appearance: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+    background: transparent; color: rgba(214, 222, 232, .6); font-size: 18px; line-height: 1;
+  }
+  .help header button:hover { background: rgba(222, 228, 236, .12); color: #fff; }
+  .help dl { display: grid; grid-template-columns: minmax(118px, auto) 1fr; gap: 9px 16px; margin: 10px 0 0; }
+  .help dt { color: rgba(236, 240, 245, .95); }
+  .help dd { margin: 0; }
+  .help kbd {
+    display: inline-block; min-width: 10px; padding: 1px 6px; text-align: center;
+    border: 1px solid rgba(214, 222, 232, .25); border-radius: 5px; background: rgba(222, 228, 236, .07);
+    font: 600 11px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;   /* sans, so the letter O can't be read as a zero */
+    color: rgba(236, 240, 245, .95);
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="caption"><b>Interactive Petal Sculpture</b><br>brush the rings to twirl them</div>
+<div class="controls" id="controls">
+<div class="switch" id="switch" role="group" aria-label="Petal configuration">
+  <button type="button" data-config="vortex">Vortex</button>
+  <button type="button" data-config="clouds">Clouds</button>
+  <button type="button" data-config="wings">Wings</button>
+  <button type="button" data-config="bloom">Bloom</button>
+  <button type="button" data-config="drift">Drift</button>
+</div>
+<div class="switch swatches" id="materials" role="group" aria-label="Material">
+  <button type="button" data-material="silver" aria-label="Silver" data-tip="Silver"><i style="--metal: linear-gradient(135deg, #f4f6f9, #9aa3af)"></i></button>
+  <button type="button" data-material="gold" aria-label="Gold" data-tip="Gold"><i style="--metal: linear-gradient(135deg, #ffe6a3, #c08a2b)"></i></button>
+  <button type="button" data-material="rose" aria-label="Rose gold" data-tip="Rose gold"><i style="--metal: linear-gradient(135deg, #ffd3c2, #b8705a)"></i></button>
+  <button type="button" data-material="bronze" aria-label="Bronze" data-tip="Bronze"><i style="--metal: linear-gradient(135deg, #d9a66b, #6e4521)"></i></button>
+</div>
+<div class="switch icon">
+  <button type="button" id="orbit" aria-pressed="false" aria-label="Auto-orbit" data-tip="Auto-orbit · O">
+    <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.4" opacity=".5"/>
+      <circle cx="10" cy="10" r="2.6" fill="currentColor" stroke="none"/>
+      <circle class="moon" cx="10" cy="2.6" r="2" fill="currentColor" stroke="none"/>
+    </svg>
+  </button>
+</div>
+</div>
+
+<button type="button" class="help-button" id="help-button" aria-label="Controls and shortcuts" aria-haspopup="dialog">?</button>
+<dialog class="help" id="help" aria-labelledby="help-title">
+  <header>
+    <h2 id="help-title">Controls</h2>
+    <button type="button" id="help-close" aria-label="Close">&times;</button>
+  </header>
+  <h3>Mouse and touch</h3>
+  <dl>
+    <dt>Move across the rings</dt><dd>Twirl each ring you pass over. Faster strokes spin harder.</dd>
+    <dt>Click or tap a ring</dt><dd>Give it a sharper flick.</dd>
+    <dt>Click and drag</dt><dd>Rotate the view around the sculpture.</dd>
+    <dt>Scroll or pinch</dt><dd>Zoom in and out.</dd>
+    <dt>Colour swatches</dt><dd>Change the metal the rings are made of.</dd>
+    <dt>Double-click</dt><dd>Reset the view to the front, level, at the starting distance.</dd>
+  </dl>
+  <h3>Keyboard</h3>
+  <dl>
+    <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> <kbd>5</kbd></dt><dd>Vortex, Clouds, Wings, Bloom, Drift.</dd>
+    <dt><kbd>M</kbd></dt><dd>Step through the materials: silver, gold, rose gold, bronze.</dd>
+    <dt><kbd>O</kbd></dt><dd>Turn the slow automatic orbit on or off.</dd>
+    <dt><kbd>&uarr;</kbd> <kbd>&darr;</kbd></dt><dd>Zoom in and out.</dd>
+    <dt><kbd>?</kbd></dt><dd>Open this panel.</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close it.</dd>
+  </dl>
+</dialog>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const RINGS = 18;           // rings in the mobile
+const SEG = 72;             // samples around one ring
+const CAMERA_Z = 14;
+const GLOW = 0.06;          // bloom strength; 0 turns the glow off entirely
+const TEMPO = 1;            // overall speed of the idle motion; lower is calmer
+const ORBIT_SPEED = 0.07;   // radians per second the view circles the sculpture when Orbit is on
+const ZOOM_NEAR = 5, ZOOM_FAR = 30;   // closest and furthest the camera can sit (it starts at CAMERA_Z)
+const PITCH_LIMIT = 1.2;     // how far a drag can tip the camera above or below level (radians)
+const MORPH = 1.3;          // how quickly one configuration eases into the next
+const PINCH_GROUP = 6;      // rings between pinches in Drift
+const WING_GROUP = 9;       // rings per wing in Wings
+
+// How each ring behaves on its invisible thread once something sets it turning.
+const TWIST_BACK = 1.1;     // how firmly the thread untwists a ring back to rest
+const TWIST_PASS = 6;       // how strongly a turning ring drags its neighbours round: the cascade
+const TWIST_DRAG = 0.32;    // how quickly a twirl dies away
+const SWING_BACK = 2.4, SWING_PASS = 3, SWING_DRAG = 0.55;   // the same three, for swaying
+const TWIRL = 2.4;          // spin a passing cursor gives a ring, per unit of cursor travel
+const PUSH = 1.0;           // sideways shove a passing cursor gives a ring
+
+// Every configuration is the same set of rings arranged by a different set of numbers, so switching
+// is just easing each number toward its new value. Layout:
+//   size     radius of the first ring            pitch    gap between rings, relative to size
+//   taper    how much rings shrink toward rear   twist    turn from one ring to the next (radians)
+//   hinge    0 ring centred on its thread point, 1 ring hung from it by one corner
+//   upright  0 ring faces along the axis, π/2 ring stands in line with it like a page on a spine
+//   pinch    swell-and-pinch grouping            saw      nested big-to-small grouping
+//   yaw      which way the axis points: 0 across the view, π/2 straight away from the camera
+//   rise     how steeply the axis climbs; π/2 is vertical
+//   band     half-width of the band              fade     how far the rear dims
+// Idle motion, which is what gives each configuration its own character:
+//   sweep    how far the twist winds and unwinds   turn     steady rotation of every ring in its plane
+//   wave     a ripple of rotation running down the rings
+//   flap     how far the rings swing open and shut on their hinge
+//   bob      a ripple of rise and fall running down the rings
+//   sway     how far the whole mobile slowly turns left and right
+//   wander   each ring's own independent swing     tilt     how far rings tip over
+//   breathe  slow size pulsing
+const CONFIGS = {
+  // A tunnel seen end-on: rings nested one inside the next. It swirls steadily, like water draining.
+  vortex: { size: 2.7, pitch: 0.11, taper: 0.74, twist: 0.15, hinge: 0, upright: 0, pinch: 0, saw: 0,
+            yaw: Math.PI / 2, rise: 0, band: 0.034, fade: 0.45,
+            sweep: 0.9, turn: 0.14, wave: 0.35, flap: 0, bob: 0, sway: 0.16, wander: 0.03, tilt: 0.02, breathe: 0.02 },
+  // Petalclouds: equal rings along a diagonal axis. The helix slowly winds tight and unwinds.
+  clouds: { size: 1.3, pitch: 0.3, taper: 0.22, twist: 0.2, hinge: 0, upright: 0, pinch: 0, saw: 0,
+            yaw: 0.5, rise: 0.22, band: 0.07, fade: 0.3,
+            sweep: 0.85, turn: 0.04, wave: 0.2, flap: 0, bob: 0.05, sway: 0.25, wander: 0.06, tilt: 0.03, breathe: 0.02 },
+  // Two fans of nested rings hinged on a vertical spine. They beat slowly open and shut.
+  wings:  { size: 1.5, pitch: 0.1, taper: 0.08, twist: Math.PI / WING_GROUP, hinge: 1, upright: 1.3, pinch: 0, saw: 1,
+            yaw: 0, rise: Math.PI / 2, band: 0.05, fade: 0.2,
+            sweep: 0.5, turn: 0, wave: 0.08, flap: 0.14, bob: 0, sway: 0.45, wander: 0.05, tilt: 0.02, breathe: 0.02 },
+  // A flower facing the viewer: petals hung by a corner round a short stem. It opens and closes.
+  bloom:  { size: 1.35, pitch: 0.07, taper: 0.45, twist: (Math.PI * 2) / 9, hinge: 1, upright: 0.6, pinch: 0, saw: 0,
+            yaw: -Math.PI / 2, rise: 0.35, band: 0.055, fade: 0.15,
+            sweep: 0.04, turn: 0.07, wave: 0, flap: 0.32, bob: 0, sway: 0.2, wander: 0.1, tilt: 0.08, breathe: 0.04 },
+  // Loose petals strung down a diagonal, each bobbing and turning in its own time.
+  drift:  { size: 1.35, pitch: 0.5, taper: 0.7, twist: 0.5, hinge: 0, upright: 0, pinch: 1, saw: 0,
+            yaw: 0.35, rise: -0.3, band: 0.055, fade: 0.6,
+            sweep: 0.4, turn: 0, wave: 0.5, flap: 0, bob: 0.32, sway: 0.3, wander: 1.0, tilt: 0.25, breathe: 0.08 },
+};
+let configName = 'vortex';
+
+// The metals the rings can be made of. All are fully metallic; colour is what the surface reflects,
+// and roughness is how blurred those reflections are.
+const MATERIALS = {
+  silver: { color: 0xd9dee6, roughness: 0.17 },
+  gold:   { color: 0xf7cb6b, roughness: 0.2 },
+  rose:   { color: 0xf3b9a4, roughness: 0.2 },
+  bronze: { color: 0xc28d56, roughness: 0.28 },
+};
+let materialName = 'silver';
+const P = { ...CONFIGS[configName] };   // the live, in-between values
+
+// ---------------------------------------------------------------- renderer
+
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06070a);
+scene.fog = new THREE.Fog(0x06070a, 14, 30);
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+camera.position.set(0, 0, CAMERA_Z);
+
+// Polished metal is almost entirely reflection, so the environment does most of the work.
+// A dark studio with a few bright softboxes reads as steel; an evenly lit room reads as white plastic.
+function studioEnvironment() {
+  const env = new THREE.Scene();
+  env.add(new THREE.Mesh(
+    new THREE.SphereGeometry(40, 32, 16),
+    new THREE.MeshBasicMaterial({ color: 0x3a3f49, side: THREE.BackSide }),
+  ));
+  const panel = (w, h, brightness, tint, pos) => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(tint).multiplyScalar(brightness), side: THREE.DoubleSide }),
+    );
+    m.position.set(...pos);
+    m.lookAt(0, 0, 0);
+    env.add(m);
+  };
+  panel(26, 10, 6, 0xffffff, [0, 22, 6]);        // overhead key
+  panel(5, 26, 5, 0xdbe8ff, [-24, 2, 8]);        // cool strip, left
+  panel(5, 26, 3.5, 0xfff0dc, [24, -3, -4]);     // warm strip, right
+  panel(18, 3, 3, 0xffffff, [4, -20, 10]);       // low kicker
+  panel(10, 10, 2, 0xbfd2ff, [0, 4, -26]);       // rim from behind
+  panel(14, 14, 1.2, 0xffffff, [0, 0, 28]);      // soft fill from the camera side
+  const texture = pmrem.fromScene(env, 0.02).texture;
+  env.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  return texture;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = studioEnvironment();
+
+// Moving lights sweep highlights along the band. They ride with the camera as it orbits.
+const lightRig = new THREE.Group();
+scene.add(lightRig);
+const lights = [
+  { color: 0xffffff, intensity: 30, radius: 7.5, speed: 0.16, phase: 0.0, height: 3.5 },
+  { color: 0x9fc4ff, intensity: 24, radius: 9.0, speed: -0.11, phase: 2.1, height: -2.5 },
+  { color: 0xffe2c0, intensity: 20, radius: 6.0, speed: 0.23, phase: 4.2, height: 0.5 },
+].map((cfg) => {
+  const light = new THREE.PointLight(cfg.color, cfg.intensity, 0, 2);
+  lightRig.add(light);
+  return { light, ...cfg };
+});
+
+// ---------------------------------------------------------------- band geometry
+
+// The outline every ring traces: a rounded triangle with gently bowed sides, at unit radius, with
+// one corner at angle 0. Built from a support function, which keeps it convex and smooth all the
+// way round and gives exact normals. Stored as [x, y, normalX, normalY] per sample.
+const loop = (() => {
+  const CORNER = 0.1;   // 0 is a circle; 0.125 would bring the corners to sharp points
+  const data = new Float32Array(SEG * 4);
+  for (let i = 0; i < SEG; i++) {
+    const th = (i / SEG) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
+    const h = (1 + CORNER * Math.cos(3 * th)) / (1 + CORNER);
+    const dh = (-3 * CORNER * Math.sin(3 * th)) / (1 + CORNER);
+    data.set([h * c - dh * sn, h * sn + dh * c, c, sn], i * 4);
+  }
+  return data;
+})();
+
+// Cross-section of the band: a flat bar with bevelled edges. Each face is listed as
+// [across0, out0, across1, out1, normalAcross, normalOut] in units of the band's half-width,
+// where "across" runs over the width of the band and "out" points away from the ring's centre.
+const FACES = (() => {
+  const B = 0.3, C = 0.13;   // half-thickness and bevel size
+  const pts = [[-1 + C, -B], [1 - C, -B], [1, -B + C], [1, B - C], [1 - C, B], [-1 + C, B], [-1, B - C], [-1, -B + C]];
+  return pts.map(([a0, o0], f) => {
+    const [a1, o1] = pts[(f + 1) % pts.length];
+    const l = Math.hypot(a1 - a0, o1 - o0);
+    return [a0, o0, a1, o1, (o1 - o0) / l, -(a1 - a0) / l];
+  });
+})();
+
+// A separate closed ring of solid band for every link, all in one mesh, rebuilt every frame.
+const LINKS = RINGS;
+const RING = SEG + 1;                 // samples per ring; the last repeats the first to close it
+const PER_SAMPLE = FACES.length * 2;  // faces don't share vertices, so the bevels stay crisp
+const VERTS = LINKS * RING * PER_SAMPLE;
+const positions = new Float32Array(VERTS * 3);
+const normals = new Float32Array(VERTS * 3);
+const colors = new Float32Array(VERTS * 3);
+const bandGeo = new THREE.BufferGeometry();
+for (const [name, array] of [['position', positions], ['normal', normals], ['color', colors]]) {
+  bandGeo.setAttribute(name, new THREE.BufferAttribute(array, 3).setUsage(THREE.DynamicDrawUsage));
+}
+{
+  const index = new Uint32Array(LINKS * SEG * FACES.length * 6);
+  let k = 0;
+  for (let i = 0; i < LINKS; i++) {
+    for (let j = 0; j < SEG; j++) {
+      for (let f = 0; f < FACES.length; f++) {
+        const a = (i * RING + j) * PER_SAMPLE + f * 2, c = a + PER_SAMPLE;
+        index.set([a, a + 1, c, a + 1, c + 1, c], k);
+        k += 6;
+      }
+    }
+  }
+  bandGeo.setIndex(new THREE.BufferAttribute(index, 1));
+}
+
+const steel = new THREE.MeshStandardMaterial({
+  color: 0xd9dee6,
+  metalness: 1,
+  roughness: 0.17,
+  envMapIntensity: 1.0,
+  vertexColors: true,   // used only to dim the rear toward the background
+});
+
+const band = new THREE.Mesh(bandGeo, steel);
+band.frustumCulled = false;
+scene.add(band);
+
+// ---------------------------------------------------------------- ring state
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const rings = [];
+for (let i = 0; i < RINGS; i++) {
+  rings.push({
+    along: Math.pow(i / (RINGS - 1), 0.85),   // 0 at the front, 1 at the rear
+    wanderRate: rand(0.07, 0.2),
+    wanderPhase: rand(0, 6.28),
+    twirl: 0, twirlVel: 0,          // rotation about the ring's own vertical thread, away from rest
+    swayX: 0, swayZ: 0, swayVX: 0, swayVZ: 0,
+    reach: 0,                       // 0..1, how squarely the cursor is on this ring's band right now
+    side: 1,                        // which side of the ring's centre the cursor is on
+    base: 1,
+  });
+}
+
+// ---------------------------------------------------------------- controls
+
+const buttons = [...document.querySelectorAll('#switch button')];
+function setConfig(name) {
+  if (!CONFIGS[name]) return;
+  configName = name;
+  for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.config === name));
+}
+for (const b of buttons) b.addEventListener('click', () => setConfig(b.dataset.config));
+addEventListener('keydown', (e) => {
+  if (document.getElementById('help').open) return;
+  const b = buttons[Number(e.key) - 1];
+  if (b) setConfig(b.dataset.config);
+  if (e.key === 'o' || e.key === 'O') setOrbit(!orbiting);
+  if (e.key === 'm' || e.key === 'M') {
+    const names = Object.keys(MATERIALS);
+    setMaterial(names[(names.indexOf(materialName) + 1) % names.length]);
+  }
+});
+
+const swatches = [...document.querySelectorAll('#materials button')];
+const metalColor = new THREE.Color();
+function setMaterial(name) {
+  if (!MATERIALS[name]) return;
+  materialName = name;
+  for (const b of swatches) b.setAttribute('aria-pressed', String(b.dataset.material === name));
+}
+for (const b of swatches) b.addEventListener('click', () => setMaterial(b.dataset.material));
+setMaterial(materialName);
+
+// Orbit: the view circles slowly round the sculpture. Switched off, it stays where it is.
+const orbitButton = document.getElementById('orbit');
+let orbiting = false, orbitAngle = 0, orbitTarget = 0, orbitSpeed = 0, orbitCos = 1, orbitSin = 0;
+function setOrbit(on) {
+  orbiting = on;
+  orbitButton.setAttribute('aria-pressed', String(on));
+}
+orbitButton.addEventListener('click', () => setOrbit(!orbiting));
+setConfig(configName);
+
+const pointer = { ndc: new THREE.Vector2(), last: new THREE.Vector2(), present: false, fresh: true, flick: false, lastMove: -Infinity };
+const now = () => performance.now() / 1000;
+
+// Help: a modal listing the controls. While it is open the sculpture ignores keys and the wheel.
+const help = document.getElementById('help');
+document.getElementById('help-button').addEventListener('click', () => help.showModal());
+document.getElementById('help-close').addEventListener('click', () => help.close());
+help.addEventListener('click', (e) => {   // a click on the backdrop, outside the panel, closes it
+  const box = help.getBoundingClientRect();
+  if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) help.close();
+});
+addEventListener('keydown', (e) => {
+  if (e.key === '?' && !help.open) help.showModal();
+});
+
+// Dragging with the mouse swings the camera round the sculpture instead of brushing the rings; a click that
+// doesn't travel flicks whatever is under it. Touch has no hover, so a finger always brushes.
+const drag = { active: false, lastX: 0, lastY: 0, travel: 0 };
+const isDragging = () => drag.active && drag.travel > 4;
+let pitch = 0, pitchTarget = 0;
+let zoom = CAMERA_Z, zoomTarget = CAMERA_Z;   // camera distance from the sculpture
+
+function onPointer(e) {
+  if (e.target !== canvas) return;   // buttons and the help panel are not part of the scene
+  pointer.ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (!pointer.present) pointer.fresh = true;   // arriving is not a stroke; don't count the jump
+  pointer.present = true;
+  pointer.lastMove = now();
+  if (e.type === 'pointerdown') {
+    if (e.pointerType === 'mouse' && e.button === 0) {
+      drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY; drag.travel = 0;
+      canvas.setPointerCapture(e.pointerId);
+    } else {
+      pointer.flick = true;
+    }
+  } else if (drag.active) {
+    const dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
+    drag.lastX = e.clientX; drag.lastY = e.clientY;
+    drag.travel += Math.abs(dx) + Math.abs(dy);
+    if (isDragging()) {
+      // the sculpture turns with the hand: drag right and it swings right, drag down and it tips toward you
+      orbitTarget -= dx * 0.006;
+      pitchTarget = THREE.MathUtils.clamp(pitchTarget + dy * 0.006, -PITCH_LIMIT, PITCH_LIMIT);
+      canvas.classList.add('dragging');
+    }
+  }
+}
+function endDrag() {
+  if (!drag.active) return;
+  if (!isDragging()) pointer.flick = true;
+  drag.active = false;
+  canvas.classList.remove('dragging');
+}
+addEventListener('pointermove', onPointer);
+addEventListener('pointerdown', onPointer);
+canvas.addEventListener('dblclick', () => {   // back to the front, level view at the starting distance
+  pitchTarget = 0;
+  zoomTarget = CAMERA_Z;
+  orbitTarget = Math.round(orbitTarget / (Math.PI * 2)) * Math.PI * 2;
+});
+// Scroll wheel, trackpad pinch, or the up and down arrow keys move the camera in and out.
+const zoomBy = (factor) => { zoomTarget = THREE.MathUtils.clamp(zoomTarget * factor, ZOOM_NEAR, ZOOM_FAR); };
+addEventListener('wheel', (e) => {
+  if (help.open) return;
+  e.preventDefault();
+  const lines = e.deltaMode === 1 ? 16 : 1;   // some mice report lines rather than pixels
+  zoomBy(Math.exp(e.deltaY * lines * (e.ctrlKey ? 0.01 : 0.0012)));
+}, { passive: false });
+addEventListener('keydown', (e) => {
+  if (help.open || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  zoomBy(e.key === 'ArrowUp' ? 0.88 : 1 / 0.88);
+});
+const lose = () => { pointer.present = false; };
+document.documentElement.addEventListener('pointerleave', lose);
+addEventListener('pointerup', (e) => { endDrag(); if (e.pointerType !== 'mouse') lose(); });
+addEventListener('pointercancel', endDrag);
+addEventListener('blur', endDrag);
+addEventListener('pointercancel', lose);
+addEventListener('blur', lose);
+
+// ---------------------------------------------------------------- post
+
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType }));
+composer.addPass(new RenderPass(scene, camera));
+if (GLOW > 0) composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), GLOW, 0.3, 1.0));
+composer.addPass(new OutputPass());
+
+let halfW = 1, halfH = 1;
+function resize() {
+  // a hidden tab reports 0×0; never let that reach the aspect ratio
+  const w = Math.max(innerWidth, 1), h = Math.max(innerHeight, 1);
+  renderer.setSize(w, h, false);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * CAMERA_Z;
+  halfW = halfH * camera.aspect;
+}
+addEventListener('resize', resize);
+resize();
+
+// ---------------------------------------------------------------- simulation
+
+const twirlAcc = new Float32Array(RINGS), swayAX = new Float32Array(RINGS), swayAZ = new Float32Array(RINGS);
+let nextBreeze = 46;   // on the simulation clock
+
+function step(t, dt) {
+  // Ease every number of the live configuration toward the selected one.
+  const want = CONFIGS[configName], ease = 1 - Math.exp(-dt * MORPH);
+  for (const key in P) P[key] += (want[key] - P[key]) * ease;
+  // ...and the metal toward the selected one, so a change of material washes over the rings.
+  const metal = MATERIALS[materialName], wash = 1 - Math.exp(-dt * 3);
+  steel.color.lerp(metalColor.set(metal.color), wash);
+  steel.roughness += (metal.roughness - steel.roughness) * wash;
+
+  // Orbit drifts the view round on its own, pausing while the user is turning it by hand.
+  orbitSpeed += ((orbiting && !isDragging() ? ORBIT_SPEED : 0) - orbitSpeed) * (1 - Math.exp(-dt * 1.5));
+  orbitTarget += orbitSpeed * dt;
+  orbitAngle += (orbitTarget - orbitAngle) * (1 - Math.exp(-dt * 8));
+  orbitCos = Math.cos(orbitAngle); orbitSin = Math.sin(orbitAngle);
+  pitch += (pitchTarget - pitch) * (1 - Math.exp(-dt * 8));
+  zoom += (zoomTarget - zoom) * (1 - Math.exp(-dt * 7));
+  const level = Math.cos(pitch) * zoom;
+  camera.position.set(orbitSin * level, Math.sin(pitch) * zoom, orbitCos * level);
+  scene.fog.near = zoom; scene.fog.far = zoom + 16;   // keep the haze behind the sculpture, not on it
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();   // the ring hit-test below reads the camera's view matrix
+  lightRig.rotation.y = orbitAngle;
+
+  // How far the cursor travelled this frame, in scene units. Rings it is passing over are set
+  // turning in the direction of travel and nudged aside, as if brushed by a hand.
+  let dx = 0, dy = 0;
+  if (pointer.present && !pointer.fresh && !isDragging()) {
+    dx = (pointer.ndc.x - pointer.last.x) * halfW;
+    dy = (pointer.ndc.y - pointer.last.y) * halfH;
+    const len = Math.hypot(dx, dy);
+    if (len > 1.2) { dx *= 1.2 / len; dy *= 1.2 / len; }
+  }
+  pointer.last.copy(pointer.ndc);
+  pointer.fresh = false;
+  for (const r of rings) {
+    if (!pointer.present || r.reach <= 0) continue;
+    r.twirlVel += r.reach * (dx + 0.5 * dy * r.side) * TWIRL;
+    // the shove is sideways and away as the viewer sees it, wherever the camera has orbited to
+    r.swayVX += r.reach * (dx * orbitCos - dy * 0.6 * orbitSin) * PUSH;
+    r.swayVZ += r.reach * (-dx * orbitSin - dy * 0.6 * orbitCos) * PUSH;
+    if (pointer.flick) r.twirlVel += r.reach * r.side * 4;   // a click or tap flicks it
+  }
+  pointer.flick = false;
+
+  // Left alone, a stray breath of air catches one ring now and then.
+  if (t > nextBreeze) {
+    if (!pointer.present || now() - pointer.lastMove > 4) {
+      rings[Math.floor(Math.random() * RINGS)].twirlVel += rand(0.8, 1.6) * (Math.random() < 0.5 ? -1 : 1);
+    }
+    nextBreeze = t + rand(5, 10);
+  }
+
+  // Each ring is a little torsion pendulum on its thread, tied loosely to its neighbours, so a
+  // twirl started anywhere runs down the line as a wave and slowly settles.
+  for (let i = 0; i < RINGS; i++) {
+    const r = rings[i], a = rings[Math.max(i - 1, 0)], b = rings[Math.min(i + 1, RINGS - 1)];
+    twirlAcc[i] = -TWIST_BACK * r.twirl + TWIST_PASS * (a.twirl + b.twirl - 2 * r.twirl) - TWIST_DRAG * r.twirlVel;
+    swayAX[i] = -SWING_BACK * r.swayX + SWING_PASS * (a.swayX + b.swayX - 2 * r.swayX) - SWING_DRAG * r.swayVX;
+    swayAZ[i] = -SWING_BACK * r.swayZ + SWING_PASS * (a.swayZ + b.swayZ - 2 * r.swayZ) - SWING_DRAG * r.swayVZ;
+  }
+  for (let i = 0; i < RINGS; i++) {
+    const r = rings[i];
+    r.twirlVel = THREE.MathUtils.clamp(r.twirlVel + twirlAcc[i] * dt, -7, 7);
+    r.twirl += r.twirlVel * dt;
+    r.swayVX += swayAX[i] * dt; r.swayX += r.swayVX * dt;
+    r.swayVZ += swayAZ[i] * dt; r.swayZ += r.swayVZ * dt;
+  }
+
+  rebuildRings(t);
+
+  for (const l of lights) {
+    const a = t * l.speed + l.phase;
+    l.light.position.set(Math.cos(a) * l.radius, l.height + Math.sin(a * 1.7) * 2, 5 + Math.sin(a) * 3.5);
+  }
+}
+
+// Lays the rings out along the configuration's axis, applies its idle motion and each ring's
+// twirl and sway, and builds the solid band for every ring.
+const axisQ = new THREE.Quaternion(), axisE = new THREE.Euler(0, 0, 0, 'YZX');
+const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3();
+function rebuildRings(t) {
+  // The axis the rings are strung along, and a frame around it. The whole mobile turns slowly.
+  axisQ.setFromEuler(axisE.set(0, P.yaw + P.sway * Math.sin(t * 0.09), P.rise));
+  T.set(1, 0, 0).applyQuaternion(axisQ);
+  N.set(0, 1, 0).applyQuaternion(axisQ);
+  B.set(0, 0, 1).applyQuaternion(axisQ);
+
+  let total = 0;
+  for (let i = 0; i < RINGS; i++) {
+    const r = rings[i];
+    r.base = P.size * (1 - P.taper * r.along);
+    if (i > 0) total += P.pitch * 0.5 * (r.base + rings[i - 1].base);
+  }
+  const twist = P.twist * (1 + P.sweep * Math.sin(t * 0.13));
+  const curX = pointer.ndc.x * halfW, curY = pointer.ndc.y * halfH;
+  const V = camera.matrixWorldInverse.elements;   // world → camera space
+
+  let dist = -total / 2;
+  for (let i = 0; i < RINGS; i++) {
+    const r = rings[i];
+    if (i > 0) dist += P.pitch * 0.5 * (r.base + rings[i - 1].base);
+
+    // where this ring's thread holds it
+    const px = T.x * dist + r.swayX;
+    const py = T.y * dist + P.bob * Math.sin(t * 0.33 - i * 0.5);
+    const pz = T.z * dist + r.swayZ;
+
+    // u: the ring's first axis, pointing out from the axis of the mobile
+    const roll = t * P.turn + i * twist
+      + P.wave * Math.sin(t * 0.27 - i * 0.45)
+      + P.wander * Math.sin(t * r.wanderRate + r.wanderPhase);
+    const cr = Math.cos(roll), sr = Math.sin(roll);
+    let ux = N.x * cr + B.x * sr, uy = N.y * cr + B.y * sr, uz = N.z * cr + B.z * sr;
+    const sx = B.x * cr - N.x * sr, sy = B.y * cr - N.y * sr, sz = B.z * cr - N.z * sr;
+    // v: its second axis, swung from sideways toward the mobile's axis as the ring stands upright
+    const up = P.upright + P.flap * Math.sin(t * 0.22 - i * 0.12);
+    const cu = Math.cos(up), su = Math.sin(up);
+    let vx = sx * cu + T.x * su, vy = sy * cu + T.y * su, vz = sz * cu + T.z * su;
+    // w: the ring's facing direction, which is also the direction the band's width runs
+    let wx = T.x * cu - sx * su, wy = T.y * cu - sy * su, wz = T.z * cu - sz * su;
+
+    // the ring's twirl: everything turns about the vertical thread it hangs from
+    const ct = Math.cos(r.twirl), st = Math.sin(r.twirl);
+    let k0 = ux * ct + uz * st; uz = uz * ct - ux * st; ux = k0;
+    k0 = vx * ct + vz * st; vz = vz * ct - vx * st; vx = k0;
+    k0 = wx * ct + wz * st; wz = wz * ct - wx * st; wx = k0;
+
+    // size of this ring: pinched groups (Drift), nested big-to-small groups (Wings), or even
+    const pinch = 0.45 + 0.55 * Math.pow(Math.abs(Math.sin((Math.PI * (i + 0.5)) / PINCH_GROUP)), 0.7);
+    const saw = 1 - 0.58 * ((i % WING_GROUP) / (WING_GROUP - 1));
+    const group = 1 + P.pinch * (pinch - 1) + P.saw * (saw - 1);
+    const scale = r.base * group * (1 + P.breathe * Math.sin(i * 2.3 + t * 0.13));
+
+    const tipDir = i * 0.9 + t * 0.05, tipX = Math.cos(tipDir), tipY = Math.sin(tipDir);
+    const tipAmt = P.tilt * Math.sin(i * 1.7 + t * 0.11);
+    // the rear dims toward the background so it fades into the distance
+    const shade = 1 - P.fade * (1 - Math.pow(1 - i / (RINGS - 1), 1.3));
+    // band width follows ring size only part of the way, so small rings keep some substance
+    const bw = P.band * P.size * Math.sqrt(scale / P.size);
+
+    let nearest = Infinity;
+    for (let j = 0; j < RING; j++) {
+      const o = (j % SEG) * 4;
+      const lx = (loop[o] - P.hinge) * scale, ly = loop[o + 1] * scale;
+      const tip = tipAmt * (lx * tipX + ly * tipY);
+      const cx = px + ux * lx + vx * ly + wx * tip;
+      const cy = py + uy * lx + vy * ly + wy * tip;
+      const cz = pz + uz * lx + vz * ly + wz * tip;
+      // how close the cursor is to this part of the band, as seen from the camera
+      if (j % 4 === 0) {
+        const persp = -CAMERA_Z / (V[2] * cx + V[6] * cy + V[10] * cz + V[14]);
+        const ex = (V[0] * cx + V[4] * cy + V[8] * cz + V[12]) * persp - curX;
+        const ey = (V[1] * cx + V[5] * cy + V[9] * cz + V[13]) * persp - curY;
+        nearest = Math.min(nearest, ex * ex + ey * ey);
+      }
+      // q: outward from the ring's centre at this point
+      const qx = ux * loop[o + 2] + vx * loop[o + 3];
+      const qy = uy * loop[o + 2] + vy * loop[o + 3];
+      const qz = uz * loop[o + 2] + vz * loop[o + 3];
+      let k = (i * RING + j) * PER_SAMPLE * 3;
+      for (let f = 0; f < FACES.length; f++) {
+        const F = FACES[f];
+        const mx = wx * F[4] + qx * F[5], my = wy * F[4] + qy * F[5], mz = wz * F[4] + qz * F[5];
+        for (let e = 0; e < 4; e += 2, k += 3) {
+          const across = F[e] * bw, out = F[e + 1] * bw;
+          positions[k] = cx + wx * across + qx * out;
+          positions[k + 1] = cy + wy * across + qy * out;
+          positions[k + 2] = cz + wz * across + qz * out;
+          normals[k] = mx; normals[k + 1] = my; normals[k + 2] = mz;
+          colors[k] = colors[k + 1] = colors[k + 2] = shade;
+        }
+      }
+    }
+    const touch = 0.28 * scale + 0.12;   // how near the band the cursor has to pass
+    r.reach = Math.max(0, 1 - Math.sqrt(nearest) / touch);
+    const centreX = px - ux * P.hinge * scale, centreZ = pz - uz * P.hinge * scale;
+    const centreY = py - uy * P.hinge * scale;
+    const seenX = V[0] * centreX + V[4] * centreY + V[8] * centreZ + V[12];
+    const seenZ = V[2] * centreX + V[6] * centreY + V[10] * centreZ + V[14];
+    r.side = curX > seenX * (-CAMERA_Z / seenZ) ? 1 : -1;
+  }
+  bandGeo.attributes.position.needsUpdate = true;
+  bandGeo.attributes.normal.needsUpdate = true;
+  bandGeo.attributes.color.needsUpdate = true;
+}
+
+let last = now();
+let clock = 40;   // simulation time; starts mid-phrase so the opening pose is already in motion
+renderer.setAnimationLoop(() => {
+  const t = now();
+  const dt = Math.min(t - last, 1 / 30) * TEMPO;
+  last = t;
+  clock += dt;
+  if (dt > 0) step(clock, dt);
+  composer.render();
+});
+</script>
+</body>
+</html>
